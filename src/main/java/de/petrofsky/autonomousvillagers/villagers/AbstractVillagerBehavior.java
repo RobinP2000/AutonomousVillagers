@@ -64,47 +64,36 @@ public abstract class AbstractVillagerBehavior extends Behavior<Villager> {
         this.currentGoal = null;
     }
 
-    public MoveToGoal moveToNow(Villager villager, BlockPos moveToPos) {
-        MoveToGoal moveToGoal = new MoveToGoal(villager, moveToPos);
+    public MoveToGoal moveToNow(Villager villager, BlockPos targetPos) {
+        MoveToGoal moveToGoal = new MoveToGoal(villager, targetPos);
         setGoal(moveToGoal);
         return moveToGoal;
 
     }
 
-    public MoveToGoal moveTo(Villager villager, BlockPos target) {
-        return new MoveToGoal(villager, target);
+    public MoveToGoal moveTo(Villager villager, BlockPos targetPos) {
+        return new MoveToGoal(villager, targetPos);
 
     }
 
-    public void breakBlock(Villager villager, BlockPos target, List<TagKey<Block>> allowedTags) {
-        breakBlock(villager, target, allowedTags, null, DEFAULT_BLOCK_RANGE - 2);
+    public BreakBlockGoal breakBlockNow(Villager villager, BlockPos targetPos) {
+        BreakBlockGoal breakBlockGoal = new BreakBlockGoal(villager, targetPos);
+        setGoal(breakBlockGoal);
+        return breakBlockGoal;
     }
 
-    public void breakBlock(Villager villager, BlockPos target, List<TagKey<Block>> allowedTags, int withinDistance) {
-        breakBlock(villager, target, allowedTags, null, withinDistance);
+    public BreakBlockGoal breakBlock(Villager villager, BlockPos targetPos) {
+        return new BreakBlockGoal(villager, targetPos);
     }
 
-    public void breakBlock(Villager villager, BlockPos target,
-                           List<TagKey<Block>> allowedTags, List<Block> allowedBlocks, int withinDistance) {
-        BreakBlockGoal breakBlockGoal = new BreakBlockGoal(villager, target, allowedTags, allowedBlocks);
-        if(blockInTouchRange(villager, target)) {
-            currentGoal = breakBlockGoal;
-        } else {
-            currentGoal = new MoveToGoal(villager, target, withinDistance,
-                    DEFAULT_WALK_SPEED, breakBlockGoal);
-        }
-        currentGoal.start();
-    }
-
-    public void placeBlock(Villager villager, BlockPos target, Block block) {
+    public PlaceBlockGoal placeBlockNow(Villager villager, BlockPos target, Block block) {
         PlaceBlockGoal placeBlockGoal = new PlaceBlockGoal(villager, target, block);
-        if(blockInTouchRange(villager, target)) {
-            currentGoal = placeBlockGoal;
-        } else {
-            currentGoal = new MoveToGoal(villager, target, DEFAULT_BLOCK_RANGE - 2,
-                    DEFAULT_WALK_SPEED, placeBlockGoal);
-        }
-        currentGoal.start();
+        setGoal(placeBlockGoal);
+        return placeBlockGoal;
+    }
+
+    public PlaceBlockGoal placeBlock(Villager villager, BlockPos target, Block block) {
+        return new PlaceBlockGoal(villager, target, block);
     }
 
     public static boolean blockInTouchRange(Villager villager, BlockPos target) {

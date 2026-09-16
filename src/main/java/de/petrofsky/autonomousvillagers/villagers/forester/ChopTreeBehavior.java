@@ -14,6 +14,7 @@ import net.minecraft.core.GlobalPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
+import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
@@ -22,6 +23,7 @@ import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
+import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
 import net.minecraft.world.level.pathfinder.Path;
@@ -161,8 +163,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
         if(!hasGoal()) {
             System.out.println("Chop3");
-            breakBlock(villager, targetPosition, List.of(BlockTags.LOGS, BlockTags.LEAVES,
-                    BlockTags.FLOWERS, BlockTags.TALL_FLOWERS));
+            breakBlockNow(villager, targetPosition)
+                    .breakableBarrier(BlockTags.LOGS, BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
+                    .breakable(BlockTags.LOGS)
+                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)).start();
         } else if(getGoal() instanceof BreakBlockGoal breakBlockGoal) {
             System.out.println("Chop4");
             if(!breakBlockGoal.hasFailed() && breakBlockGoal.isStopped()) {
@@ -182,8 +186,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                     }
                     clearGoal();
                 } else {
-                    breakBlock(villager, targetPosition, List.of(BlockTags.LOGS, BlockTags.LEAVES,
-                            BlockTags.FLOWERS, BlockTags.TALL_FLOWERS));
+                    breakBlockNow(villager, targetPosition)
+                            .breakableBarrier(BlockTags.LOGS, BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
+                            .breakable(BlockTags.LOGS)
+                            .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)).start();
                 }
             } else {
                 System.out.println("Chop4.5");
@@ -234,7 +240,11 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             }
             clearGoal();
         }
-        breakBlock(villager, targetDirt, List.of(BlockTags.DIRT, BlockTags.FLOWERS), 1);
+        breakBlockNow(villager, targetDirt)
+                .breakableBarrier(BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
+                .breakable(BlockTags.DIRT)
+                .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES).withinDistance(0))
+                .start();
     }
 
 
