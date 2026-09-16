@@ -1,0 +1,7 @@
+{
+  "blocks": [
+    "autonomousvillagers:wood_chop_block"
+  ],
+  "max_tickets": 1,
+  "valid_range": 1
+}

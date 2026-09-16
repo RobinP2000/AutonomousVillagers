@@ -1,0 +1,25 @@
+{
+  "replace": true,
+  "values": [
+    "minecraft:armorer",
+    "minecraft:butcher",
+    "minecraft:cartographer",
+    "minecraft:cleric",
+    "minecraft:fisherman",
+    "minecraft:fletcher",
+    "minecraft:leatherworker",
+    "minecraft:librarian",
+    "minecraft:mason",
+    "minecraft:shepherd",
+    "minecraft:toolsmith",
+    "minecraft:weaponsmith",
+    {
+      "id": "autonomousvillagers:modded_farmer_poi",
+      "required": false
+    },
+    {
+      "id": "autonomousvillagers:modded_forester_poi",
+      "required": false
+    }
+  ]
+}

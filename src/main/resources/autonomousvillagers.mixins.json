@@ -1,0 +1,13 @@
+{
+  "required": true,
+  "package": "de.petrofsky.autonomousvillagers.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "PoiTypesMixin",
+    "StructureTemplateMixin",
+    "VillagerGoalPackagesMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

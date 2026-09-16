@@ -1,0 +1,7 @@
+{
+  "blocks": [
+    "minecraft:composter"
+  ],
+  "max_tickets": 1,
+  "valid_range": 1
+}
