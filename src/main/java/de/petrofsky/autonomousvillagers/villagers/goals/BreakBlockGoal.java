@@ -97,6 +97,7 @@ public class BreakBlockGoal extends Goal{
             BlockPos next = getBlockPosInSight();
             BlockState nextState = this.level.getBlockState(next);
             if(!isBreakableBlock(next, nextState)) fail();
+            this.breakPos = next;
             this.breakBlock = nextState.getBlock();
             this.speed = calculateBreakingTicks();
             return;

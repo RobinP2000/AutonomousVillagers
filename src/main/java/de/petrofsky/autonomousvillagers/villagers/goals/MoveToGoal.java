@@ -233,7 +233,7 @@ public class MoveToGoal extends Goal {
                 currentTodo = new OpenDoorGoal(getVillager(), changeTarget);
             } else if(breakPosResult.isPresent()) {
                 changeTarget = breakPosResult.get();
-                currentTodo = new BreakBlockGoal(getVillager(), changeTarget, List.of(BlockTags.DIRT));
+                currentTodo = new BreakBlockGoal(getVillager(), changeTarget);
             } else {
                 changeTarget = currentActions.keySet().stream().findFirst().get();
                 currentTodo = new PlaceBlockGoal(getVillager(), changeTarget, Blocks.DIRT);
@@ -252,26 +252,29 @@ public class MoveToGoal extends Goal {
         getVillager().getMoveControl().setWantedPosition(nextPos.getX() + 0.5D,
                 nextPos.getY(), nextPos.getZ() + 0.5D, speed);
 
-        BlockState positionState = level.getBlockState(getVillager().blockPosition());
-        BlockState belowPositionState = level.getBlockState(getVillager().blockPosition().below());
-        BlockState abovePositionState = level.getBlockState(getVillager().blockPosition().above());
-        boolean hasParent = nextNode.getParentPos() != null;
-        if(hasParent) {
-            if(tick % 2 == 0 & (positionState.getFluidState().is(Tags.Fluids.WATER) ||
-                    belowPositionState.getFluidState().is(Tags.Fluids.WATER) )
-                    && ! (abovePositionState.getFluidState().is(Tags.Fluids.WATER)
-                    && nextNode.getParentPos().getPos().getY() >= nextPos.getY())) {
+
+
+        BlockPos currentPos = nextNode.getParentPos() != null ? nextNode.getParentPos().getPos() : nextPos ;
+
+            BlockState currentState = level.getBlockState(currentPos);
+            BlockState aboveCurrentState = level.getBlockState(currentPos.above());
+            BlockState belowCurrentState = level.getBlockState(currentPos.below());
+            if(tick % 3 == 0 &&
+                    (currentState.getFluidState().is(Tags.Fluids.WATER) && (
+                    !aboveCurrentState.getFluidState().is(Tags.Fluids.WATER) ||
+                            (nextNode.getParentPos() != null && nextNode.getParentPos().getPos().getY() < nextPos.getY())) ||
+                    (!currentState.getFluidState().is(Tags.Fluids.WATER) && belowCurrentState.getFluidState().is(Tags.Fluids.WATER))) ) {
                 getVillager().setSwimming(true);
-                if(positionState.getFluidState().is(Tags.Fluids.WATER)) {
-                    getVillager().jumpInFluid(positionState.getFluidState().getFluidType());
+                if(currentState.getFluidState().is(Tags.Fluids.WATER)) {
+                    getVillager().jumpInFluid(currentState.getFluidState().getFluidType());
                 } else {
-                    getVillager().jumpInFluid(belowPositionState.getFluidState().getFluidType());
+                    getVillager().jumpInFluid(belowCurrentState.getFluidState().getFluidType());
                 }
 
             } else if (getVillager().isSwimming()) {
                 getVillager().setSwimming(false);
             }
-        }
+
 
 
         int dBlockX = getVillager().getBlockX() - nextPos.getX();

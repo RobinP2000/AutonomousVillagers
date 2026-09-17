@@ -30,8 +30,9 @@ public class PathUtils {
 
     protected static boolean requiresBreak(ShortPath shortPath, Node originNode, BlockPos target) {
         NodeActionType type = originNode.getActionType(target);
-        return ((type == null || type == NodeActionType.NONE) && ! shortPath.hasEmptyCollusion(target))
-                || type == NodeActionType.PLACED;
+        return ((type == null || type == NodeActionType.NONE) && ! shortPath.hasEmptyCollusion(target)
+                && !isWater(shortPath, target)
+                || type == NodeActionType.PLACED);
     }
 
     protected static boolean isPlaceable(ShortPath shortPath, Node origin, BlockPos target, long blocksLeft) {
@@ -41,7 +42,8 @@ public class PathUtils {
 
     protected static boolean requiresPlacement(ShortPath shortPath, Node originNode, BlockPos target) {
         NodeActionType type = originNode.getActionType(target);
-        return ((type == null || type == NodeActionType.NONE) && shortPath.hasEmptyCollusion(target))
+        return ((type == null || type == NodeActionType.NONE) && shortPath.hasEmptyCollusion(target)
+                && !isWater(shortPath, target))
                 || type == NodeActionType.BROKEN;
     }
 
@@ -106,5 +108,11 @@ public class PathUtils {
         }
 
         return false;
+    }
+
+    protected static boolean isWater(ShortPath shortPath, BlockPos pos) {
+        BlockState state = shortPath.getState(pos);
+
+        return state.getFluidState().is(Tags.Fluids.WATER);
     }
 }

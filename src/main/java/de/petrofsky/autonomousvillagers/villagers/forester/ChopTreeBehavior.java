@@ -337,7 +337,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
         BlockPos leavePos = hasLeavesAround(level);
         if (leavePos != null) {
-            breakBlock(villager, leavePos, List.of(BlockTags.LEAVES, BlockTags.LOGS));
+            breakBlockNow(villager, leavePos)
+                    .breakableBarrier(BlockTags.LEAVES).breakable(BlockTags.LEAVES)
+                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES))
+                    .start();
             System.out.println("Leave detected");
             return;
         }
@@ -450,7 +453,8 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
         }
         clearGoal();
-        breakBlock(villager, targetPos, List.of(BlockTags.DIRT));
+        breakBlockNow(villager, targetPos).breakable(BlockTags.DIRT).start();
+
     }
 
 

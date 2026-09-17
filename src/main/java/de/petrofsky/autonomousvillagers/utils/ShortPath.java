@@ -266,6 +266,13 @@ public class ShortPath {
             return Map.entry(-1L, new HashMap<>());
         }
 
+        /*
+        if (PathUtils.isWater(this, target) && PathUtils.isWater(this, aboveTarget)) {
+           return Map.entry(20L, new HashMap<>());
+        } else if(PathUtils.isWater(this, target) && getState(aboveTarget).isAir()) {
+            return Map.entry(10L, new HashMap<>());
+        }*/
+
         HashMap<BlockPos, NodeActionType> checks = new HashMap<>(Map.of(
                 target.below(), NodeActionType.PLACED,
                 target, NodeActionType.BROKEN,
