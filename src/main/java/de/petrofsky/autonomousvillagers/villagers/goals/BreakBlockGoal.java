@@ -83,11 +83,13 @@ public class BreakBlockGoal extends Goal{
     @Override
     protected void tick() {
         if(this.moveToGoal != null) {
+
             if(this.moveToGoal.isInProgress()) {
                 this.moveToGoal.executeTick();
                 return;
             } else if(this.moveToGoal.hasFailed()) {
                 fail();
+                System.out.println("Failed break because movement failed");
                 return;
             }
             this.moveToGoal = null;
@@ -96,7 +98,11 @@ public class BreakBlockGoal extends Goal{
         if(this.breakBlock == null) {
             BlockPos next = getBlockPosInSight();
             BlockState nextState = this.level.getBlockState(next);
-            if(!isBreakableBlock(next, nextState)) fail();
+            if(!isBreakableBlock(next, nextState)) {
+                fail();
+                System.out.println("Failed break because block not breakable");
+                return;
+            }
             this.breakPos = next;
             this.breakBlock = nextState.getBlock();
             this.speed = calculateBreakingTicks();
@@ -111,11 +117,11 @@ public class BreakBlockGoal extends Goal{
             this.ticks++;
             int progress = (int) (((float) this.ticks / this.speed) * 10.0F);
             this.level.destroyBlockProgress(getVillager().getId(), getBreakPos(), progress);
-            this.ticks++;
         } else {
             BlockState breakState = this.level.getBlockState(getBreakPos());
             if(!isBreakableBlock(getBreakPos(), breakState)) {
                 fail();
+                System.out.println("Failed break because block not breakable anymore");
                 return;
             }
             level.destroyBlock(getBreakPos(), true, getVillager());

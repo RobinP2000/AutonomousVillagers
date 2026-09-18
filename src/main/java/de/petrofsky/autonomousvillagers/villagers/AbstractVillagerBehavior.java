@@ -33,7 +33,10 @@ public abstract class AbstractVillagerBehavior extends Behavior<Villager> {
     protected final void tick(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime) {
         if(hasGoal()) {
             Goal goal = getGoal();
-
+            System.out.println("goal: " + goal);
+            System.out.println("goal started: " + goal.isStarted());
+            System.out.println("goal stopped: " + goal.isStopped());
+            System.out.println("goal in rpogress: " + goal.isInProgress());
             if(goal.isInProgress()) {
                 goal.executeTick();
                 return;

@@ -142,7 +142,7 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                 itemsAround.removeFirst();
             } else {
                 ItemEntity itemTarget = itemsAround.getFirst();
-                moveToNow(villager, itemTarget.blockPosition()).start();
+                moveToNow(villager, itemTarget.blockPosition()).withinDistance(0).start();
             }
             return;
         }
@@ -166,10 +166,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             breakBlockNow(villager, targetPosition)
                     .breakableBarrier(BlockTags.LOGS, BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
                     .breakable(BlockTags.LOGS)
-                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)).start();
+                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES).inTouchRange()).start();
         } else if(getGoal() instanceof BreakBlockGoal breakBlockGoal) {
             System.out.println("Chop4");
-            if(!breakBlockGoal.hasFailed() && breakBlockGoal.isStopped()) {
+            if(!breakBlockGoal.hasFailed()) {
                 System.out.println("Chop4.2");
                 if(pendingLogs.contains(breakBlockGoal.getBreakPos())) {
                     if(breakBlockGoal.getBreakPos().equals(this.nextBlockTarget)) {
@@ -189,16 +189,13 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                     breakBlockNow(villager, targetPosition)
                             .breakableBarrier(BlockTags.LOGS, BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
                             .breakable(BlockTags.LOGS)
-                            .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)).start();
+                            .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)
+                                    .inTouchRange()).start();
                 }
             } else {
-                System.out.println("Chop4.5");
+                clearGoal();
+                phase = Phase.SCAFFOLD_BUILD;
             }
-        } else if(getGoal() instanceof MoveToGoal moveToGoal && moveToGoal.hasFailed()) {
-            clearGoal();
-            phase = Phase.SCAFFOLD_BUILD;
-        } else if(getGoal() instanceof MoveToGoal moveToGoal && !moveToGoal.hasFailed()) {
-            clearGoal();
         }
     }
 
@@ -232,11 +229,6 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                 }
                 System.out.println("broken size: " + this.scaffoldBroken.size());
                 this.scaffoldCollectionTargets.remove(breakBlockGoal.getBreakPos());
-
-                if(breakBlockGoal.getBreakPos().equals(targetDirt)) {
-                    clearGoal();
-                    return;
-                }
             }
             clearGoal();
         }

@@ -24,6 +24,7 @@ public class MoveToGoal extends Goal {
     private final Level level;
     private int withinDistance = AbstractVillagerBehavior.DEFAULT_BLOCK_RANGE - 2;
     private float speed = AbstractVillagerBehavior.DEFAULT_WALK_SPEED;
+    private boolean inTouchRange = false;
     private int tick = 19;
     private int index = 0;
     private Vec3 lastPosition;
@@ -90,6 +91,11 @@ public class MoveToGoal extends Goal {
         return this;
     }
 
+    public MoveToGoal inTouchRange() {
+        this.inTouchRange = true;
+        return this;
+    }
+
     public MoveToGoal begin() {
         start();
         return this;
@@ -128,15 +134,24 @@ public class MoveToGoal extends Goal {
 
     @Override
     protected void tick() {
+        System.out.println("movement tick: " + tick);
         tick++;
         if(tick >= 20) {
             tick = 0;
         }
 
+        if(inTouchRange && AbstractVillagerBehavior.blockInTouchRange(getVillager(), getTarget())) {
+            success();
+            System.out.println("in touch range success movement:");
+            return;
+        }
+
         if(currentTodo != null && currentTodo.isInProgress()) {
             currentTodo.executeTick();
+            System.out.println("execute todo in movement:");
             return;
         } else if(currentTodo != null) {
+            System.out.println("is door todo in movement:");
             if(currentTodo instanceof OpenDoorGoal openDoorGoal) {
                 long distance = BlockGeometry3DUtils.getDistanceSquared(getVillager().blockPosition(),
                         openDoorGoal.getDoorPos());
@@ -159,7 +174,8 @@ public class MoveToGoal extends Goal {
         if(index >= size) {
             System.out.println("move reach: " + this.shortPath.isReachable());
             System.out.println("move limit: " + this.shortPath.searchLimitReached());
-            if(!this.shortPath.isReachable() && this.shortPath.searchLimitReached()) {
+            if(!this.shortPath.isReachable() && this.shortPath.searchLimitReached() && !(inTouchRange
+                    && AbstractVillagerBehavior.blockInTouchRange(getVillager(), getTarget()))) {
                 calculate(getTarget());
                 if(this.shortPath.getPath().size() < 3 && this.shortPath.searchLimitReached()) {
                     fail();
@@ -168,7 +184,9 @@ public class MoveToGoal extends Goal {
                 return;
             }
             System.out.println("normal Reachable: " + this.shortPath.isReachable());
-            if( ! this.shortPath.isReachable()) fail(); else success();
+            if( ! this.shortPath.isReachable() && !(inTouchRange
+                    && AbstractVillagerBehavior.blockInTouchRange(getVillager(), getTarget()))
+                ) fail(); else success();
             return;
         }
         if(tick % 10 == 0) {
@@ -262,8 +280,8 @@ public class MoveToGoal extends Goal {
             if(tick % 3 == 0 &&
                     (currentState.getFluidState().is(Tags.Fluids.WATER) && (
                     !aboveCurrentState.getFluidState().is(Tags.Fluids.WATER) ||
-                            (nextNode.getParentPos() != null && nextNode.getParentPos().getPos().getY() < nextPos.getY())) ||
-                    (!currentState.getFluidState().is(Tags.Fluids.WATER) && belowCurrentState.getFluidState().is(Tags.Fluids.WATER))) ) {
+                            (nextNode.getParentPos() != null && nextNode.getParentPos().getPos().getY() < nextPos.getY()))) ||
+                    (belowCurrentState.getFluidState().is(Tags.Fluids.WATER)) ) {
                 getVillager().setSwimming(true);
                 if(currentState.getFluidState().is(Tags.Fluids.WATER)) {
                     getVillager().jumpInFluid(currentState.getFluidState().getFluidType());
@@ -285,10 +303,15 @@ public class MoveToGoal extends Goal {
         double horizontalDistanceSquared = dX * dX + dZ * dZ;
         int blockHorizontalDistanceSquared = dBlockX * dBlockX + dBlockZ * dBlockZ;
 
+        BlockPos villagerPos = getVillager().blockPosition();
+        BlockState villagerPosState = level.getBlockState(villagerPos);
+        boolean inWater = villagerPosState.getFluidState().is(Tags.Fluids.WATER);
         double dY = Math.abs(getVillager().getY() - nextPos.getY());
         if(index == getShortPath().getPath().size() - 1 ) {
             if(blockHorizontalDistanceSquared < 1 && dY < 0.5) this.index++;
-        } else if (horizontalDistanceSquared < 0.8D && !(dY > 1.5D && !getVillager().isSwimming())) {
+        } else if (inWater && blockHorizontalDistanceSquared < 1) {
+            this.index++;
+        } else if(!inWater && horizontalDistanceSquared < 0.8D && dY <= 1.5D) {
             this.index++;
         }
 
