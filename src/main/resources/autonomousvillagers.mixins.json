@@ -5,7 +5,8 @@
   "mixins": [
     "PoiTypesMixin",
     "StructureTemplateMixin",
-    "VillagerGoalPackagesMixin"
+    "VillagerGoalPackagesMixin",
+    "VillagerSwingMixin"
   ],
   "injectors": {
     "defaultRequire": 1
