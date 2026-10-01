@@ -24,19 +24,53 @@ public abstract class AbstractVillagerBehavior extends Behavior<Villager> {
     public static final int DEFAULT_BLOCK_RANGE = 4;
 
     protected Goal currentGoal;
+    private int ticks = 0;
+    private int totalTicks = 0;
+
+    private long lastBeginCheck = 0;
+    private final int checkBeginInterval;
+    private long lastContinueCheck = 0;
+    private final int checkContinueInterval;
+
+    public AbstractVillagerBehavior(Map<MemoryModuleType<?>, MemoryStatus> p_22528_, int maxDuration,
+                                    int checkBeginInterval, int checkContinueInterval) {
+        super(p_22528_, maxDuration);
+        this.checkBeginInterval = checkBeginInterval;
+        this.checkContinueInterval = checkContinueInterval;
+    }
 
     public AbstractVillagerBehavior(Map<MemoryModuleType<?>, MemoryStatus> p_22528_, int maxDuration) {
-        super(p_22528_, maxDuration);
+        this(p_22528_, maxDuration, 0, 0);
     }
+
+    @Override
+    protected final boolean checkExtraStartConditions(@NotNull ServerLevel level, @NotNull Villager villager) {
+        long now = System.currentTimeMillis();
+        if (now - this.lastBeginCheck <= this.checkBeginInterval) {
+            return false;
+        }
+        this.lastBeginCheck = now;
+        return canBegin(level, villager);
+    }
+
+    protected abstract boolean canBegin(@NotNull ServerLevel level, @NotNull Villager villager);
+
+    @Override
+    protected final boolean canStillUse(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime) {
+        long now = System.currentTimeMillis();
+        if(now - this.lastContinueCheck <= this.checkContinueInterval) {
+            return true;
+        }
+        this.lastContinueCheck = now;
+        return canContinue(level, villager, gameTime);
+    }
+
+    protected abstract boolean canContinue(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime);
 
     @Override
     protected final void tick(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime) {
         if(hasGoal()) {
             Goal goal = getGoal();
-            System.out.println("goal: " + goal);
-            System.out.println("goal started: " + goal.isStarted());
-            System.out.println("goal stopped: " + goal.isStopped());
-            System.out.println("goal in rpogress: " + goal.isInProgress());
             if(goal.isInProgress()) {
                 goal.executeTick();
                 return;
@@ -69,6 +103,7 @@ public abstract class AbstractVillagerBehavior extends Behavior<Villager> {
 
     public MoveToGoal moveToNow(Villager villager, BlockPos targetPos) {
         MoveToGoal moveToGoal = new MoveToGoal(villager, targetPos);
+        System.out.println("Move from: " + villager.blockPosition() + " to " + targetPos);
         setGoal(moveToGoal);
         return moveToGoal;
 

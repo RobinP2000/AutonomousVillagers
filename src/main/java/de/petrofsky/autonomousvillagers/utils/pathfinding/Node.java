@@ -1,4 +1,4 @@
-package de.petrofsky.autonomousvillagers.utils;
+package de.petrofsky.autonomousvillagers.utils.pathfinding;
 
 import net.minecraft.core.BlockPos;
 import org.jetbrains.annotations.NotNull;

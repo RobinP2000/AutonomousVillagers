@@ -216,6 +216,11 @@ public class SurfaceFinder {
     private final boolean[] blocked;
     private int resultLength = 0;
 
+    @SuppressWarnings("unchecked")
+    private TagKey<Block>[] breakableTags = new TagKey[1];
+    private int breakableTagCount = 0;
+    private boolean hasBreakableBlocks = false;
+
     // ---- The single, reused MutableBlockPos used for all block lookups (avoids
     // object allocation during the search). ----
     private final BlockPos.MutableBlockPos currentPos;
@@ -293,6 +298,13 @@ public class SurfaceFinder {
         this.tagTargets = Arrays.copyOf(this.tagTargets, this.tagTargets.length + 1);
         this.tagTargets[this.tagCount++] = tag;
         this.checkBlocking = true;
+        return this;
+    }
+
+    public SurfaceFinder breakable(TagKey<Block> tag) {
+        this.breakableTags = Arrays.copyOf(this.breakableTags, this.breakableTags.length + 1);
+        this.breakableTags[this.breakableTagCount++] = tag;
+        this.hasBreakableBlocks = true;
         return this;
     }
 
@@ -532,6 +544,15 @@ public class SurfaceFinder {
                 setBlocked(x, z);
             }
         }
+    }
+
+    private boolean isBreakable(BlockState state) {
+        for (int i = 0; i < this.breakableTagCount; i++) {
+            if (state.is(this.breakableTags[i])) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
@@ -784,7 +805,8 @@ public class SurfaceFinder {
 
         // 7) The position itself must be passable (air or no collision shape) -
         // you can't stand INSIDE a solid block.
-        if(!childState.isAir() && !childState.getCollisionShape(level, this.currentPos).isEmpty()) return false;
+        if(!childState.isAir() && !isBreakable(childState)
+                && !childState.getCollisionShape(level, this.currentPos).isEmpty()) return false;
 
         this.currentPos.set(childX, childY -1, childZ);
 
@@ -815,7 +837,7 @@ public class SurfaceFinder {
 
         // 10) Headroom: the block directly above the position must also be
         // passable (entities such as villagers are 2 blocks tall).
-        if(!aboveChildState.isAir() && !aboveChildState
+        if(!aboveChildState.isAir() && !isBreakable(aboveChildState) && !aboveChildState
                 .getCollisionShape(level, this.currentPos).isEmpty()) return false;
 
 
@@ -840,7 +862,7 @@ public class SurfaceFinder {
             this.currentPos.set(parentX, childY + 1, parentZ);
             BlockState aboveAboveParentState = fastGetState(this.currentPos.getX(),
                     this.currentPos.getY(), this.currentPos.getZ());
-            if(aboveAboveParentState.isAir() || aboveAboveParentState
+            if(aboveAboveParentState.isAir() || isBreakable(aboveAboveParentState) || aboveAboveParentState
                     .getCollisionShape(level, this.currentPos).isEmpty()) {
                 setVisitedY(childIndex, newChildY);
                 if(newChildY != UNAVAILABLE_VALUE) resultLength++;
@@ -856,7 +878,7 @@ public class SurfaceFinder {
             this.currentPos.set(childX, childY + 2, childZ);
             BlockState aboveAboveChildState = fastGetState(this.currentPos.getX(),
                     this.currentPos.getY(), this.currentPos.getZ());
-            if(aboveAboveChildState.isAir() || aboveAboveChildState
+            if(aboveAboveChildState.isAir() || isBreakable(aboveAboveChildState) || aboveAboveChildState
                     .getCollisionShape(level, this.currentPos).isEmpty()) {
                 setVisitedY(childIndex, newChildY);
                 if(newChildY != UNAVAILABLE_VALUE) resultLength++;

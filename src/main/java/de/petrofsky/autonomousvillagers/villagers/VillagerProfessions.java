@@ -3,6 +3,8 @@ package de.petrofsky.autonomousvillagers.villagers;
 import com.google.common.collect.ImmutableSet;
 import de.petrofsky.autonomousvillagers.AutonomousVillagers;
 import de.petrofsky.autonomousvillagers.blocks.ForesterBlock;
+import de.petrofsky.autonomousvillagers.utils.ResourceProfile;
+import de.petrofsky.autonomousvillagers.villagers.forester.Forester;
 import net.minecraft.core.Holder;
 import net.minecraft.core.registries.BuiltInRegistries;
 import net.minecraft.core.registries.Registries;
@@ -16,9 +18,12 @@ import net.minecraft.world.level.block.state.BlockState;
 import net.neoforged.bus.api.IEventBus;
 import net.neoforged.neoforge.registries.DeferredRegister;
 
+import java.util.HashMap;
 import java.util.Set;
 
 public class VillagerProfessions {
+
+    public static final HashMap<VillagerProfession, ResourceProfile> PROFILES = new HashMap<>();
 
     public static final DeferredRegister<VillagerProfession> PROFESSIONS =
             DeferredRegister.create(Registries.VILLAGER_PROFESSION, AutonomousVillagers.MODID);
@@ -55,7 +60,7 @@ public class VillagerProfessions {
                             Items.JUNGLE_WOOD, Items.JUNGLE_LEAVES, Items.JUNGLE_LOG,
                             Items.MANGROVE_WOOD, Items.MANGROVE_LEAVES, Items.MANGROVE_LOG,
                             Items.SPRUCE_WOOD, Items.SPRUCE_LEAVES, Items.SPRUCE_LOG,
-                            Items.DIRT
+                            Items.DIRT, Items.STICK
                             ),
                     ImmutableSet.of(),
                     SoundEvents.VILLAGER_NO));
@@ -63,6 +68,8 @@ public class VillagerProfessions {
     public static void register(IEventBus eventBus) {
         PROFESSIONS.register(eventBus);
         POI_TYPES.register(eventBus);
+
+      //  PROFILES.put(MODDED_FORESTER.value(), Forester.RESOURCE_PROFILE);
     }
 
     private static Set<BlockState> getBlockStates(Block p_218074_) {

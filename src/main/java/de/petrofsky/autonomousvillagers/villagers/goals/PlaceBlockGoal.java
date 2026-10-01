@@ -4,6 +4,7 @@ import de.petrofsky.autonomousvillagers.utils.InventoryUtils;
 import de.petrofsky.autonomousvillagers.villagers.AbstractVillagerBehavior;
 import net.minecraft.core.BlockPos;
 import net.minecraft.sounds.SoundSource;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
@@ -50,13 +51,16 @@ public class PlaceBlockGoal extends Goal{
             }
             this.moveToGoal = null;
         }
-
         BlockState placePosState = getLevel().getBlockState(getPlacePos());
-        if((!placePosState.isAir() && ! placePosState.getCollisionShape(getLevel(), getPlacePos()).isEmpty())
-            || ! AbstractVillagerBehavior.blockInTouchRange(getVillager(), getPlacePos())
-                || ! InventoryUtils.hasAny(getVillager(), getBlock().asItem())) {
+        boolean replaceable = placePosState.canBeReplaced();
+        boolean inTouchRange = AbstractVillagerBehavior.blockInTouchRange(getVillager(), getPlacePos());
+        boolean blockInInventory = InventoryUtils.hasAny(getVillager(), getBlock().asItem());
+
+        if(!replaceable || ! inTouchRange || ! blockInInventory) {
+            System.out.println("Fails placement");
+            System.out.println("replaceable: " + replaceable);
+            System.out.println("block: " + placePosState.getBlock());
             fail();
-            System.out.println("Failed");
             return;
         }
 
@@ -70,6 +74,7 @@ public class PlaceBlockGoal extends Goal{
         }
 
         getLevel().setBlock(getPlacePos(), getBlock().defaultBlockState(), 3);
+        getVillager().swing(InteractionHand.MAIN_HAND);
         SoundType soundType = getBlock().defaultBlockState().getSoundType(getLevel(), getPlacePos(), getVillager());
         level.playSound(
                 getVillager(),

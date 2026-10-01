@@ -2,6 +2,7 @@ package de.petrofsky.autonomousvillagers.debug;
 
 import de.petrofsky.autonomousvillagers.AutonomousVillagers;
 import de.petrofsky.autonomousvillagers.utils.InventoryUtils;
+import de.petrofsky.autonomousvillagers.utils.pathfinding.Node;
 import de.petrofsky.autonomousvillagers.villagers.goals.MoveToGoal;
 import net.minecraft.ChatFormatting;
 import net.minecraft.commands.Commands;
@@ -137,6 +138,7 @@ public class DebugSystem {
                     session.testEntity.setInvulnerable(true);
                     session.testEntity.setCanPickUpLoot(false);
                     session.testEntity.setSilent(true);
+                    session.testEntity.setItemInHand(InteractionHand.MAIN_HAND, Items.DIAMOND_SWORD.getDefaultInstance());
                     InventoryUtils.increase(session.testEntity, ItemTags.DIRT, 64);
 
                     session.testEntity.getBrain().removeAllBehaviors();
@@ -187,7 +189,7 @@ public class DebugSystem {
                 if (session.currentGoal != null && session.currentGoal.getShortPath() != null) {
                     var path = session.currentGoal.getShortPath().getPath();
                     if (path != null && session.testEntity != null && session.testEntity.level() instanceof ServerLevel sl) {
-                        for (de.petrofsky.autonomousvillagers.utils.Node node : path) {
+                        for (Node node : path) {
                             BlockPos pathPos = node.getPos();
 
                             sl.sendParticles(ParticleTypes.END_ROD, pathPos.getX() + 0.5, pathPos.getY() + 0.5, pathPos.getZ() + 0.5, 1, 0, 0, 0, 0);

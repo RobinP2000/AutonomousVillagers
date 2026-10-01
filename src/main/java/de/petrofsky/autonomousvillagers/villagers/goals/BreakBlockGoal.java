@@ -4,6 +4,7 @@ import de.petrofsky.autonomousvillagers.utils.BlockDataUtils;
 import de.petrofsky.autonomousvillagers.villagers.AbstractVillagerBehavior;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.TagKey;
+import net.minecraft.world.InteractionHand;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.level.ClipContext;
@@ -24,8 +25,11 @@ public class BreakBlockGoal extends Goal{
 
     private final BlockPos targetPos;
     private BlockPos breakPos;
+    private BlockState breakState;
     private int speed;
+    private int ticksLeft;
     private int ticks = 0;
+    private boolean targetBroken = false;
     private final Level level;
     private Block breakBlock;
     private MoveToGoal moveToGoal;
@@ -79,24 +83,29 @@ public class BreakBlockGoal extends Goal{
         return this;
     }
 
+    public boolean isTargetBroken() {
+        return targetBroken;
+    }
 
     @Override
     protected void tick() {
         if(this.moveToGoal != null) {
-
             if(this.moveToGoal.isInProgress()) {
                 this.moveToGoal.executeTick();
                 return;
             } else if(this.moveToGoal.hasFailed()) {
                 fail();
-                System.out.println("Failed break because movement failed");
+                getVillager().getNavigation().stop();
                 return;
             }
             this.moveToGoal = null;
+
         }
+        getVillager().getNavigation().stop();
 
         if(this.breakBlock == null) {
             BlockPos next = getBlockPosInSight();
+            System.out.println("Is next target pos: " + this.targetPos.equals(next));
             BlockState nextState = this.level.getBlockState(next);
             if(!isBreakableBlock(next, nextState)) {
                 fail();
@@ -105,18 +114,18 @@ public class BreakBlockGoal extends Goal{
             }
             this.breakPos = next;
             this.breakBlock = nextState.getBlock();
+            this.breakState = nextState;
             this.speed = calculateBreakingTicks();
+            this.ticks = 0;
             return;
         }
-
-        getVillager().getNavigation().stop();
         getVillager().getLookControl().setLookAt(getBreakPos().getX() + 0.5D,
                 getBreakPos().getY() + 0.5D, getBreakPos().getZ() + 0.5D);
-
         if(this.ticks < this.speed) {
             this.ticks++;
             int progress = (int) (((float) this.ticks / this.speed) * 10.0F);
             this.level.destroyBlockProgress(getVillager().getId(), getBreakPos(), progress);
+            getVillager().swing(InteractionHand.MAIN_HAND);
         } else {
             BlockState breakState = this.level.getBlockState(getBreakPos());
             if(!isBreakableBlock(getBreakPos(), breakState)) {
@@ -125,10 +134,15 @@ public class BreakBlockGoal extends Goal{
                 return;
             }
             level.destroyBlock(getBreakPos(), true, getVillager());
-            if(!getTargetPos().equals(getBreakPos()) && this.multipleBlocks) {
+            boolean targetBroken = getTargetPos().equals(getBreakPos());
+            if(targetBroken) {
+                this.targetBroken = true;
+            }
+            if(!targetBroken && this.multipleBlocks) {
                 this.breakBlock = null;
             } else {
                 success();
+                System.out.println("Success at " + this.breakPos);
             }
         }
     }
@@ -183,6 +197,10 @@ public class BreakBlockGoal extends Goal{
 
     public BlockPos getBreakPos() {
         return breakPos;
+    }
+
+    public BlockState getBreakState() {
+        return breakState;
     }
 
     public Block getBreakBlock() {

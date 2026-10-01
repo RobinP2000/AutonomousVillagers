@@ -6,6 +6,7 @@
     "PoiTypesMixin",
     "StructureTemplateMixin",
     "VillagerGoalPackagesMixin",
+    "VillagerPickupMixin",
     "VillagerSwingMixin"
   ],
   "injectors": {

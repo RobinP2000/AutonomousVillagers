@@ -2,31 +2,32 @@ package de.petrofsky.autonomousvillagers.villagers.forester;
 
 import de.petrofsky.autonomousvillagers.blocks.ForesterBlockEntity;
 import de.petrofsky.autonomousvillagers.utils.BlockDataUtils;
-import de.petrofsky.autonomousvillagers.utils.BlockGeometry2DUtils;
 import de.petrofsky.autonomousvillagers.utils.BlockGeometry3DUtils;
 import de.petrofsky.autonomousvillagers.utils.InventoryUtils;
+import de.petrofsky.autonomousvillagers.utils.geometry.Plane;
+import de.petrofsky.autonomousvillagers.utils.geometry.ShapeUtils;
+import de.petrofsky.autonomousvillagers.utils.pathfinding.SurfaceFinder;
+import de.petrofsky.autonomousvillagers.village.Village;
 import de.petrofsky.autonomousvillagers.villagers.AbstractVillagerBehavior;
 import de.petrofsky.autonomousvillagers.villagers.goals.BreakBlockGoal;
 import de.petrofsky.autonomousvillagers.villagers.goals.MoveToGoal;
 import de.petrofsky.autonomousvillagers.villagers.goals.PlaceBlockGoal;
 import net.minecraft.core.BlockPos;
-import net.minecraft.core.GlobalPos;
 import net.minecraft.server.level.ServerLevel;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.ItemTags;
-import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.ai.attributes.AttributeInstance;
 import net.minecraft.world.entity.ai.attributes.Attributes;
 import net.minecraft.world.entity.ai.memory.MemoryModuleType;
 import net.minecraft.world.entity.ai.memory.MemoryStatus;
 import net.minecraft.world.entity.item.ItemEntity;
 import net.minecraft.world.entity.npc.Villager;
+import net.minecraft.world.item.Item;
 import net.minecraft.world.item.ItemStack;
 import net.minecraft.world.item.Items;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.Blocks;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.level.pathfinder.Path;
 import org.jetbrains.annotations.NotNull;
 
 import java.util.*;
@@ -36,46 +37,73 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
     record TreeBlocks(ArrayList<BlockPos> logs) {}
 
-    private enum Phase {
-        NAVIGATE,
-        CHOP,
-        SCAFFOLD_BUILD,
-        SCAFFOLD_GAIN,
-        SCAFFOLD_DESTROY,
-        SCAFFOLD_RETURN
+    public enum Phase {
+       CHOP, SCAFFOLD_BUILD, SCAFFOLD_GAIN, SCAFFOLD_DESTROY, SCAFFOLD_RETURN
     }
 
-    // ── Konstanten ────────────────────────────────────────────────────────────
+    private static final int MAX_DURATION = 6000;
 
-    private static final int   MAX_DURATION = 6000;
-    private static final float WALK_SPEED   = 0.6f;
-
-    // ── Zustandsfelder ────────────────────────────────────────────────────────
-
-    private List<BlockPos> pendingLogs    = new ArrayList<>();
-    private List<BlockPos> scaffoldBroken = new ArrayList<>();
-    private List<Map.Entry<BlockPos, Boolean>> scaffoldPlaced = new ArrayList<>();
-    private List<BlockPos> scaffoldCollectionTargets = new ArrayList<>();
     private List<ItemEntity> itemsAround = new ArrayList<>();
-    private BlockPos baseLogPosition;
+    private ForesterBlockEntity foresterBlockEntity;
 
     private BlockPos nextBlockTarget;
-    private Phase phase = Phase.CHOP;
-
-    private int   placeCooldown = 0;
 
     public ChopTreeBehavior() {
         super(Map.of(
                 MemoryModuleType.JOB_SITE,   MemoryStatus.VALUE_PRESENT,
                 MemoryModuleType.WALK_TARGET, MemoryStatus.REGISTERED
-        ), MAX_DURATION);
+        ), MAX_DURATION, 10_000, 1_000);
+    }
+
+    private boolean canContinueCurrentJob(ServerLevel level, Villager villager) {
+        int dirtCount = InventoryUtils.count(villager.getInventory(), Items.DIRT);
+        int logCount = 0;
+        int emptySlots = InventoryUtils.countEmptySlots(villager.getInventory());
+        if(this.foresterBlockEntity.getNextBlockTarget() != null) {
+            BlockPos blockPos = this.foresterBlockEntity.getNextBlockTarget();
+            BlockState blockState = level.getBlockState(blockPos);
+            if(blockState.is(BlockTags.LOGS)) {
+                Item log = blockState.getBlock().asItem();
+                logCount = InventoryUtils.count(villager.getInventory(), log);
+            }
+        }
+        Phase phase = this.foresterBlockEntity.getPhase();
+        boolean hasPendingLogs = this.foresterBlockEntity.hasPendingLogs();
+        if(phase == Phase.CHOP && hasPendingLogs
+                && (logCount % 64) == 0 && emptySlots == 0 ) {
+            return false;
+        } else if (phase == Phase.SCAFFOLD_GAIN && hasPendingLogs
+                && !hasEnoughScaffoldBlocks(villager) && (dirtCount % 64) == 0 && emptySlots == 0) {
+            return false;
+        } else if (phase == Phase.SCAFFOLD_DESTROY && this.foresterBlockEntity.hasScaffoldsPlaced()
+                && (((dirtCount % 64) == 0 && emptySlots == 0))) {
+            return false;
+        }
+        return phase != Phase.SCAFFOLD_RETURN || this.foresterBlockEntity.hasScaffoldsBroken();
     }
 
     @Override
-    protected boolean checkExtraStartConditions(@NotNull ServerLevel level, @NotNull Villager villager) {
-        ForesterBlockEntity be = getBlockEntity(level, villager);
+    protected boolean canBegin(@NotNull ServerLevel level, @NotNull Villager villager) {
+        ForesterBlockEntity be = Forester.getBlockEntity(level, villager);
         if (be == null) return false;
-        return this.nextBlockTarget != null || findBaseLog(villager, level, be) != null;
+        this.foresterBlockEntity = be;
+
+        if((be.hasTreeTarget() && canContinueCurrentJob(level, villager))) {
+            return true;
+        }
+
+        List<BlockPos> targets = new SurfaceFinder(level, be.getBlockPos(), 8, 11)
+                .find(BlockTags.LOGS).between(villager.blockPosition(), 1, 10)
+                .breakable(BlockTags.LEAVES).scan(true);
+        if(!targets.isEmpty()) {
+            TreeBlocks tree = scanTree(level, targets.getFirst());
+            tree.logs().sort(Comparator.comparingInt(BlockPos::getY));
+            this.foresterBlockEntity.addAllPendingLog(tree.logs());
+            selectNextTarget();
+            this.foresterBlockEntity.setPhase(Phase.CHOP);
+        }
+
+        return false;
     }
 
     @Override
@@ -85,28 +113,20 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             followRange.setBaseValue(48.0D);
             villager.getNavigation().setMaxVisitedNodesMultiplier(4.0f);
         }
-        if (this.nextBlockTarget != null) return;
+        if (this.foresterBlockEntity == null) return;
 
-        ForesterBlockEntity be = getBlockEntity(level, villager);
-        if (be == null) return;
-        BlockPos treeBase = findBaseLog(villager, level, be);
-        if (treeBase == null) return;
-
-        this.baseLogPosition = treeBase;
-        TreeBlocks tree = scanTree(level, treeBase);
-
-        pendingLogs.addAll(tree.logs());
-        pendingLogs.sort(Comparator.comparingInt(BlockPos::getY));
-
-        selectNextTarget(level, villager);
-
-        placeCooldown = 0;
+        if(this.foresterBlockEntity.hasTreeTarget()) {
+            if(this.foresterBlockEntity.hasPendingLogs() && this.foresterBlockEntity.getNextBlockTarget() == null) {
+                this.foresterBlockEntity.setNextBlockTarget(this.foresterBlockEntity.getFirstPendingLog());
+            }
+            return;
+        }
     }
 
 
     protected void executeBehavior(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime) {
-        System.out.println("Phase: " + phase);
-        switch (phase) {
+        System.out.println("Phase: " + this.foresterBlockEntity.getPhase());
+        switch (this.foresterBlockEntity.getPhase()) {
             case CHOP            -> tickChop(level, villager);
             case SCAFFOLD_GAIN   -> tickScaffoldGain(level, villager);
             case SCAFFOLD_BUILD -> tickScaffoldPlacement(level, villager);
@@ -116,15 +136,12 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
     }
 
     @Override
-    protected boolean canStillUse(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime) {
-        return ! this.pendingLogs.isEmpty() || ! this.scaffoldPlaced.isEmpty()
-                || ! this.scaffoldBroken.isEmpty() || ! this.itemsAround.isEmpty();
+    protected boolean canContinue(@NotNull ServerLevel level, @NotNull Villager villager, long gameTime) {
+        return this.foresterBlockEntity.hasTreeTarget() && canContinueCurrentJob(level, villager);
     }
 
     @Override
     protected void stop(@NotNull ServerLevel level, Villager villager, long gameTime) {
-        phase = Phase.CHOP;
-        placeCooldown = 0;
         clearGoal();
         villager.getNavigation().stop();
         villager.getBrain().eraseMemory(MemoryModuleType.WALK_TARGET);
@@ -134,9 +151,9 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
     // ── Phase: CHOP ───────────────────────────────────────────────────────────
 
     private void tickChop(ServerLevel level, Villager villager) {
-        if(this.pendingLogs.isEmpty()) {
+        if(!this.foresterBlockEntity.hasPendingLogs()) {
            if(this.itemsAround == null || this.itemsAround.isEmpty()) {
-                this.phase = Phase.SCAFFOLD_DESTROY;
+                this.foresterBlockEntity.setPhase(Phase.SCAFFOLD_DESTROY);
             } else if(hasGoal() && getGoal() instanceof MoveToGoal moveToGoal && moveToGoal.isStopped()
                         && moveToGoal.getTarget().equals(itemsAround.getFirst().blockPosition())) {
                 itemsAround.removeFirst();
@@ -149,15 +166,15 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
         BlockPos targetPosition = this.nextBlockTarget;
         if (targetPosition == null) {
-            selectNextTarget(level, villager);
+            selectNextTarget();
             return;
         }
 
         if (! level.getBlockState(targetPosition).is(BlockTags.LOGS) && ! hasGoal()) {
             System.out.println("Chop2");
-            this.pendingLogs.remove(targetPosition);
+            this.foresterBlockEntity.removePendingLog(targetPosition);
             this.nextBlockTarget = null;
-            selectNextTarget(level, villager);
+            selectNextTarget();
             return;
         }
 
@@ -166,23 +183,24 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             breakBlockNow(villager, targetPosition)
                     .breakableBarrier(BlockTags.LOGS, BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
                     .breakable(BlockTags.LOGS)
-                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES).inTouchRange()).start();
+                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)
+                            .closeAsPossible().inTouchRange()).start();
         } else if(getGoal() instanceof BreakBlockGoal breakBlockGoal) {
             System.out.println("Chop4");
             if(!breakBlockGoal.hasFailed()) {
                 System.out.println("Chop4.2");
-                if(pendingLogs.contains(breakBlockGoal.getBreakPos())) {
+                if(this.foresterBlockEntity.hasPendingLog(breakBlockGoal.getBreakPos())) {
                     if(breakBlockGoal.getBreakPos().equals(this.nextBlockTarget)) {
                         this.nextBlockTarget = null;
                         System.out.println("Chop4.3");
                     }
-                    pendingLogs.remove(breakBlockGoal.getBreakPos());
+                    this.foresterBlockEntity.removePendingLog(breakBlockGoal.getBreakPos());
 
-                    if(this.pendingLogs.isEmpty()) {
+                    if(!this.foresterBlockEntity.hasPendingLogs()) {
                         this.itemsAround = BlockDataUtils.getItemsAround(level,
                                 villager.getBoundingBox(), 8, ItemTags.LOGS);
                     } else {
-                        selectNextTarget(level, villager);
+                        selectNextTarget();
                     }
                     clearGoal();
                 } else {
@@ -190,18 +208,36 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                             .breakableBarrier(BlockTags.LOGS, BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
                             .breakable(BlockTags.LOGS)
                             .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)
-                                    .inTouchRange()).start();
+                                    .inTouchRange().closeAsPossible()).start();
                 }
             } else {
-                clearGoal();
-                phase = Phase.SCAFFOLD_BUILD;
+                moveToNow(villager, targetPosition).closeAsPossible()
+                        .breakable(BlockTags.LEAVES).inTouchRange().start();
             }
+        } else if(getGoal() instanceof MoveToGoal goal && goal.hasFailed()) {
+            clearGoal();
+            this.foresterBlockEntity.setPhase(Phase.SCAFFOLD_BUILD);
+        } else {
+            clearGoal();
         }
     }
 
     public void tickScaffoldGain(ServerLevel level, Villager villager) {
-        this.itemsAround = BlockDataUtils.getItemsAround(level,
-                villager.getBoundingBox(), 8, ItemTags.DIRT);
+        if(hasGoal()) {
+            if(getGoal() instanceof BreakBlockGoal breakBlockGoal) {
+                System.out.println("Failed: " + breakBlockGoal.hasFailed());
+                System.out.println("TargetBroken: " + breakBlockGoal.isTargetBroken());
+                if(! breakBlockGoal.hasFailed() && breakBlockGoal.isTargetBroken()) {
+                    this.foresterBlockEntity.addScaffoldBroken(breakBlockGoal.getTargetPos());
+                    this.itemsAround = BlockDataUtils.getItemsAround(level,
+                            villager.getBoundingBox(), 8, ItemTags.DIRT);
+                }
+                this.foresterBlockEntity.removeScaffoldCollectionTarget(breakBlockGoal.getBreakPos());
+            }
+            clearGoal();
+        }
+
+
         if(!this.itemsAround.isEmpty()) {
             ItemEntity itemTarget = this.itemsAround.getFirst();
             moveToNow(villager, itemTarget.blockPosition()).withinDistance(0).start();
@@ -210,7 +246,7 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
         }
 
         if (hasEnoughScaffoldBlocks(villager)) {
-          this.phase = Phase.SCAFFOLD_BUILD;
+            this.foresterBlockEntity.setPhase(Phase.SCAFFOLD_BUILD);
             return;
         }
 
@@ -220,43 +256,35 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             return;
         }
 
-        if(hasGoal()) {
-            if(getGoal() instanceof MoveToGoal moveToGoal && moveToGoal.isStopped() && moveToGoal.hasFailed()) {
-                this.scaffoldCollectionTargets.remove(moveToGoal.getTarget());
-            } else if(getGoal() instanceof BreakBlockGoal breakBlockGoal) {
-                if(! breakBlockGoal.hasFailed() ) {
-                    this.scaffoldBroken.add(breakBlockGoal.getBreakPos());
-                }
-                System.out.println("broken size: " + this.scaffoldBroken.size());
-                this.scaffoldCollectionTargets.remove(breakBlockGoal.getBreakPos());
-            }
-            clearGoal();
-        }
         breakBlockNow(villager, targetDirt)
                 .breakableBarrier(BlockTags.LEAVES, BlockTags.FLOWERS, BlockTags.TALL_FLOWERS)
                 .breakable(BlockTags.DIRT)
-                .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES).withinDistance(0))
+                .multipleBlocks()
+                .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES)
+                        .withinDistance(0).cheapBreak())
                 .start();
     }
 
 
     private BlockPos findNearestBreakableDirt(Villager villager, ServerLevel level) {
-        if(!scaffoldCollectionTargets.isEmpty()) {
-            System.out.println("Dirt 1");
-            return scaffoldCollectionTargets.getFirst();
+        if(this.foresterBlockEntity.hasScaffoldCollectionTargets()) {
+            BlockPos next = this.foresterBlockEntity.getFirstScaffoldCollectionTarget();
+            this.foresterBlockEntity.removeScaffoldCollectionTarget(next);
+            return next;
         }
 
         BlockPos villagerPos = villager.blockPosition();
 
         final BlockPos distanceTo;
-        if(!scaffoldPlaced.isEmpty()) {
-            distanceTo = scaffoldPlaced.getFirst().getKey();
+        if(this.foresterBlockEntity.hasScaffoldsPlaced()) {
+            distanceTo = this.foresterBlockEntity.getFirstScaffoldPlaced().getKey();
         } else {
             distanceTo = null;
         }
 
-        List<BlockPos> centerSelections = BlockGeometry2DUtils.getCircleBetweenXZ(villagerPos, 5, 9,
-                villagerPos.getY(), false, false, true);
+
+        List<BlockPos> centerSelections = ShapeUtils.circle(villagerPos, 9)
+                .on(Plane.XZ, villagerPos.getY()).between(5).toList();
         if(distanceTo != null) {
             centerSelections = centerSelections.stream().filter(blockPos ->
                     !BlockGeometry3DUtils.withinDistance(blockPos, distanceTo, 6)).toList();
@@ -266,12 +294,13 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             return null;
         }
         BlockPos blockPos = centerSelections.getFirst();
-        List<BlockPos> field = BlockGeometry2DUtils.getCircleXZ(blockPos, 4,
-                blockPos.getY());
-        List<BlockPos> targets = BlockDataUtils.getHighestPos(level, field, villagerPos, 1);
+        List<BlockPos> field = ShapeUtils.circle(blockPos, 4).on(Plane.XZ, blockPos.getY()).toList();
+        List<BlockPos> targets = BlockDataUtils.getHighestPos(level, field, villagerPos, 10);
         System.out.println("Dirt 2.5: " + targets.size());
 
         targets = BlockDataUtils.getWithAnyTags(level, targets, BlockTags.DIRT);
+        targets = BlockDataUtils.getSolidBelow(level, targets);
+        targets = BlockDataUtils.getNonHoles(level, targets, true);
 
         if(targets.isEmpty()) {
             System.out.println("Dirt 3");
@@ -279,59 +308,68 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
         } else {
             System.out.println("Dirt 4");
             if(distanceTo != null) {
-                scaffoldCollectionTargets.addAll(targets);
+                this.foresterBlockEntity.addAllScaffoldCollectionTargets(targets);
             } else {
-                scaffoldCollectionTargets.addAll(targets.subList(0, Math.min(4, targets.size() - 1)));
+                this.foresterBlockEntity.addAllScaffoldCollectionTargets
+                        (targets.subList(0, Math.min(4, targets.size() - 1)));
             }
-            return !scaffoldCollectionTargets.isEmpty() ? scaffoldCollectionTargets.getFirst() : null;
+            return this.foresterBlockEntity.hasScaffoldCollectionTargets() ?
+                    this.foresterBlockEntity.getFirstScaffoldCollectionTarget() : null;
         }
     }
 
     public void tickScaffoldPlacement(ServerLevel level, Villager villager) {
-        boolean goalLeft = hasGoal() && getGoal() instanceof PlaceBlockGoal placeBlockGoal
-                && ! placeBlockGoal.hasFailed();
-        if(this.pendingLogs.isEmpty() && !goalLeft) {
-            System.out.println("Placement 1");
-            this.phase = Phase.SCAFFOLD_DESTROY;
-            return;
-        }
-        if(goalLeft) {
-            PlaceBlockGoal placeBlockGoal = (PlaceBlockGoal) getGoal();
-            this.scaffoldPlaced.add(Map.entry(placeBlockGoal.getPlacePos(), false));
+        if(getGoal() instanceof PlaceBlockGoal placeBlockGoal) {
+            System.out.println("successful placement: " + placeBlockGoal.isSuccess());
+            if(placeBlockGoal.isSuccess()) {
+                if(!this.foresterBlockEntity.hasScaffoldsPlaced())
+                    this.foresterBlockEntity.clearScaffoldCollectionTargets();
+                this.foresterBlockEntity.addScaffoldPlaced(placeBlockGoal.getPlacePos(), false);
+            } else if(BlockDataUtils.hasTags(level, placeBlockGoal.getPlacePos(), BlockTags.FLOWERS)){
+               breakBlockNow(villager, placeBlockGoal.getPlacePos()).breakable(BlockTags.FLOWERS).start();
+               return;
+            }
             clearGoal();
             return;
         }
-        if (this.nextBlockTarget == null) {
-            System.out.println("Placement 2");
-            selectNextTarget(level, villager);
 
+        if(!this.foresterBlockEntity.hasPendingLogs()) {
+            this.foresterBlockEntity.setPhase(Phase.SCAFFOLD_DESTROY);
             return;
         }
-        if( blockInTouchRange(villager, this.nextBlockTarget) || (!this.scaffoldPlaced.isEmpty() &&
+
+        if (this.nextBlockTarget == null) {
+            System.out.println("Placement 2");
+            selectNextTarget();
+            return;
+        }
+        if( blockInTouchRange(villager, this.nextBlockTarget) || (this.foresterBlockEntity.hasScaffoldsPlaced() &&
                 BlockGeometry3DUtils.withinDistance(this.nextBlockTarget,
-                        this.scaffoldPlaced.getLast().getKey(), 2))) {
-            this.phase = Phase.CHOP;
+                        this.foresterBlockEntity.getLastScaffoldPlaced().getKey(), 2))) {
+            this.foresterBlockEntity.setPhase(Phase.CHOP);
             clearGoal();
             System.out.println("Placement 3");
             return;
         }
 
       if(!InventoryUtils.hasAny(villager, ItemTags.DIRT)) {
-            this.phase = Phase.SCAFFOLD_GAIN;
+            this.foresterBlockEntity.setPhase(Phase.SCAFFOLD_GAIN);
             return;
         }
 
-        if( ! scaffoldPlaced.isEmpty() && !BlockGeometry3DUtils.withinDistance(villager.blockPosition(),
-                scaffoldPlaced.getLast().getKey().above(), 2)) {
-            moveToNow(villager, scaffoldPlaced.getLast().getKey().above()).start();
+        if( this.foresterBlockEntity.hasScaffoldsPlaced() && !BlockGeometry3DUtils.withinDistance(villager.blockPosition(),
+                this.foresterBlockEntity.getLastScaffoldPlaced().getKey().above(), 2)) {
+            moveToNow(villager,  this.foresterBlockEntity.getLastScaffoldPlaced().getKey().above()).withinDistance(0).start();
+            System.out.println("Placement 4: " +  this.foresterBlockEntity.getLastScaffoldPlaced().getKey().above());
             return;
         }
 
         BlockPos leavePos = hasLeavesAround(level);
         if (leavePos != null) {
             breakBlockNow(villager, leavePos)
-                    .breakableBarrier(BlockTags.LEAVES).breakable(BlockTags.LEAVES)
-                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES))
+                    .breakableBarrier(BlockTags.LEAVES, BlockTags.LOGS).breakable(BlockTags.LEAVES, BlockTags.LOGS)
+                    .movement(moveToGoal -> moveToGoal.breakable(BlockTags.LEAVES).inTouchRange()
+                            .cheapBreak())
                     .start();
             System.out.println("Leave detected");
             return;
@@ -346,48 +384,28 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
         BlockPos scaffoldPos = nextScaffold.getKey();
         boolean isSolid = nextScaffold.getValue();
 
-        // Cooldown für das Platzieren abwarten (analog zu breakCooldown)
-        if (placeCooldown > 0) {
-            placeCooldown--;
-            return;
-        }
-
         if(scaffoldPos == null) {
             System.out.println("Placement 7");
             return;
         }
 
-        /*
-
-        if(scaffoldPlaced.isEmpty() && !blockInTouchRange(villager, scaffoldPos)) {
-            System.out.println("Placement 7.1");
-            BlockPos blockPos = BlockDataUtils.getWalkableNeighbor(level, scaffoldPos.above(), this.nextBlockTarget);
-            moveTo(villager, blockPos);
-            return;
-        } else if (!scaffoldPlaced.isEmpty() && ! BlockGeometry3DUtils.withinDistance(villager.getOnPos(),
-                scaffoldPlaced.getLast().getKey(), 4)) {
-            System.out.println("Placement 8");
-            BlockPos lastPlaced = scaffoldPlaced.getLast().getKey();
-            moveTo(villager, lastPlaced);
-
-            return;
-        }*/
-
         System.out.println("Placement 9: " + scaffoldPos);
         System.out.println("Placeent 9 range: " + !blockInTouchRange(villager, scaffoldPos));
-        System.out.println("Placeent 9 not empty: " + ! scaffoldPlaced.isEmpty());
+        System.out.println("Placeent 9 not empty: " + this.foresterBlockEntity.hasScaffoldsPlaced());
 
 
         if(!isSolid) {
-            placeBlock(villager, scaffoldPos, Blocks.DIRT);
+            placeBlockNow(villager, scaffoldPos, Blocks.DIRT).movement(movement ->
+                    movement.cheapBreak().inTouchRange().breakable(BlockTags.LEAVES)).start();
+            System.out.println("Placement 10");
         } else {
-            this.scaffoldPlaced.add(Map.entry(scaffoldPos, true));
+            if(!this.foresterBlockEntity.hasScaffoldsPlaced()) this.foresterBlockEntity.clearScaffoldCollectionTargets();
+            this.foresterBlockEntity.addScaffoldPlaced(scaffoldPos, true);
         }
     }
 
     public void tickScaffoldDestruction(ServerLevel level, Villager villager) {
-        System.out.println("left: " + this.scaffoldPlaced.size());
-        if(this.scaffoldPlaced.isEmpty()) {
+        if(!this.foresterBlockEntity.hasScaffoldsPlaced()) {
             System.out.println("Destruction 0");
             List<ItemEntity> dirtItemsAround = BlockDataUtils.getItemsAround(level,
                     villager.getBoundingBox(), 5, Items.DIRT);
@@ -398,104 +416,70 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                 moveToNow(villager, movementTarget).withinDistance(0).start();
                 return;
             }
-            this.phase = Phase.SCAFFOLD_RETURN;
+            this.foresterBlockEntity.setPhase(Phase.SCAFFOLD_RETURN);
             clearGoal();
             return;
         }
-
-        Map.Entry<BlockPos, Boolean> target = this.scaffoldPlaced.getLast();
+        int count = this.foresterBlockEntity.countScaffoldPlaced();
+        Map.Entry<BlockPos, Boolean> target = this.foresterBlockEntity.getLastScaffoldPlaced();
         BlockPos targetPos = target.getKey();
+        BlockState state = level.getBlockState(targetPos);
         boolean placedByVillager = ! target.getValue();
-        if(! placedByVillager) {
+        if(! placedByVillager || state.isAir()) {
             System.out.println("Destruction 1");
-            this.scaffoldPlaced.removeLast();
+            this.foresterBlockEntity.removeScaffoldPlaced(targetPos);
             return;
         }
 
         if(hasGoal() && getGoal() instanceof BreakBlockGoal breakBlockGoal) {
             BlockPos breakPos = breakBlockGoal.getBreakPos();
             if(!breakBlockGoal.hasFailed()) {
-                this.scaffoldPlaced.removeIf(entry ->
-                        entry.getKey().equals(breakPos));
+                this.foresterBlockEntity.removeScaffoldPlaced(breakPos);
                 if(breakPos.equals(targetPos)) {
                     clearGoal();
                     return;
                 }
-            } else if(!level.getBlockState(breakPos).is(BlockTags.DIRT) &&
-                    !level.getBlockState(breakPos).is(Blocks.GRASS_BLOCK)) {
-                // Block ist gar nicht mehr da (z.B. anderweitig entfernt) -> Eintrag verwerfen.
-                this.scaffoldPlaced.removeIf(entry ->
-                        entry.getKey().equals(breakPos));
-                clearGoal();
             } else {
-                // Vorher wurde hier NICHTS gemacht (die Bedingung "! hasGoal()" konnte innerhalb
-                // von "if(hasGoal() && ...)" nie wahr werden), das gescheiterte Goal blieb also
-                // fuer immer als currentGoal stehen und tickScaffoldDestruction() haengte sich
-                // an genau diesem Eintrag auf - alle darunterliegenden Gerüstbloecke wurden nie
-                // mehr angefasst. Jetzt: Goal loeschen, damit unten ein neuer Versuch gestartet wird.
+                if(count > 2) {
+                    moveToNow(villager,  targetPos)
+                            .withinDistance(2).closeAsPossible().cheapBreak()
+                            .breakable(BlockTags.LEAVES).start();
+                    return;
+                }
+                this.foresterBlockEntity.removeScaffoldPlaced(breakPos);
                 clearGoal();
             }
         } else {
             if(!level.getBlockState(targetPos).is(BlockTags.DIRT) &&
-                    !level.getBlockState(targetPos).is(Blocks.GRASS_BLOCK) && ! hasGoal()) {
-                this.scaffoldPlaced.removeIf(entry ->
-                        entry.getKey().equals(targetPos));
+                    !level.getBlockState(targetPos).is(Blocks.GRASS_BLOCK)) {
+                this.foresterBlockEntity.removeScaffoldPlaced(targetPos);
                 return;
             }
 
         }
         clearGoal();
-        breakBlockNow(villager, targetPos).breakable(BlockTags.DIRT).start();
-
+        breakBlockNow(villager, targetPos).breakableBarrier(BlockTags.LEAVES)
+                .breakable(BlockTags.DIRT).start();
     }
 
 
 
     public void tickScaffoldReturn(ServerLevel level, Villager villager) {
-        if(scaffoldBroken.isEmpty()) {
-            System.out.println("return 1: All blocks broken");
-            return;
-        }
+        if(!this.foresterBlockEntity.hasScaffoldsBroken())   return;
 
-        BlockPos targetPos = scaffoldBroken.getLast();
-        if (BlockDataUtils.isSolid(level, targetPos)) {
-            System.out.println("return 3");
-            scaffoldBroken.remove(targetPos);
-            return;
-        }
-
-        if(!InventoryUtils.hasAny(villager, ItemTags.DIRT)) {
-            System.out.println("return 2");
-            return;
-        }
-
-        if (! blockInTouchRange(villager, targetPos)) {
-            System.out.println("return 4");
-            Path scaffoldPath = getPath(villager, targetPos);
-            if ( scaffoldPath != null && scaffoldPath.canReach()) {
-                villager.getNavigation().moveTo(scaffoldPath, WALK_SPEED);
-            }
-            return;
-        }
-
-        if (placeCooldown > 0) {
-            placeCooldown--;
-            return;
-        }
-        villager.getNavigation().stop();
-        lookAt(villager, targetPos);
-
-        level.setBlock(targetPos, Blocks.DIRT.defaultBlockState(), 3);
-        InventoryUtils.decrease(villager, ItemTags.DIRT);
+        BlockPos targetPos = this.foresterBlockEntity.getLastScaffoldBroken();
+        this.foresterBlockEntity.removeScaffoldBroken(targetPos);
+        placeBlockNow(villager, targetPos, Blocks.DIRT).movement(moveToGoal -> moveToGoal
+                .inTouchRange().breakable(BlockTags.LEAVES)).start();
     }
 
     // ── Hilfsmethoden (statisch) ──────────────────────────────────────────────
 
     private BlockPos hasLeavesAround(ServerLevel level) {
-        if (this.scaffoldPlaced.isEmpty()) return null;
+        if (!this.foresterBlockEntity.hasScaffoldsPlaced()) return null;
         int index = 0;
-        while (index < this.scaffoldPlaced.size()) {
-            Map.Entry<BlockPos, Boolean> placement = this.scaffoldPlaced.get(index);
+        while (index < this.foresterBlockEntity.countScaffoldPlaced()) {
+            Map.Entry<BlockPos, Boolean> placement = this.foresterBlockEntity.getScaffoldPlaced(index);
             BlockPos blockPos = placement.getKey();
             if(BlockDataUtils.hasTags(level, blockPos.above(), BlockTags.LEAVES)) {
                 return blockPos.above();
@@ -506,7 +490,7 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
             if(BlockDataUtils.hasTags(level, blockPos.above().above().above(), BlockTags.LEAVES)) {
                 return blockPos.above().above().above();
             }
-            if (index == this.scaffoldPlaced.size() - 1) {
+            if (index == this.foresterBlockEntity.countScaffoldPlaced() - 1) {
                 if(BlockDataUtils.hasTags(level, blockPos.east(), BlockTags.LEAVES)) {
                     return blockPos.east();
                 }
@@ -592,15 +576,6 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
         return null;
     }
 
-    private static ForesterBlockEntity getBlockEntity(ServerLevel level, Villager villager) {
-        Optional<GlobalPos> jobOpt = villager.getBrain().getMemory(MemoryModuleType.JOB_SITE);
-        if (jobOpt.isEmpty()) return null;
-        GlobalPos jobSite = jobOpt.get();
-        if (!jobSite.dimension().equals(level.dimension())) return null;
-        if (level.getBlockEntity(jobSite.pos()) instanceof ForesterBlockEntity be) return be;
-        return null;
-    }
-
     private TreeBlocks scanTree(ServerLevel level, BlockPos originBlockPos) {
         ArrayList<BlockPos> logs = new ArrayList<>();
 
@@ -632,16 +607,17 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
 
     private Map.Entry<BlockPos, Boolean> nextScaffoldPosition(Villager villager, ServerLevel level) {
-        if(this.scaffoldPlaced.isEmpty()) {
+        if(!this.foresterBlockEntity.hasScaffoldsPlaced()) {
            BlockPos firstPos = BlockDataUtils.getReachableBlocksOnRadius(level, villager.blockPosition(), nextBlockTarget, 7);
             return firstPos == null ? null : Map.entry(firstPos, BlockDataUtils.isSolid(level, firstPos));
         }
 
-        BlockPos lastPos = this.scaffoldPlaced.getLast().getKey();
+        BlockPos lastPos = this.foresterBlockEntity.getLastScaffoldPlaced().getKey();
         boolean stairs = lastPos.getY()+1 <this.nextBlockTarget.getY();
 
         if(stairs) {
-            if(this.scaffoldPlaced.size() == 1) {
+            int scaffoldPlacedCount = this.foresterBlockEntity.countScaffoldPlaced();
+            if(scaffoldPlacedCount == 1) {
                 List<BlockPos> blockPositions = BlockGeometry3DUtils.getNeighborByTargetDistance
                         (lastPos, this.nextBlockTarget);
                 Optional<BlockPos> blockPosResult = blockPositions.stream()
@@ -651,7 +627,7 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                 return blockPosResult.map(blockPos -> Map.entry(blockPos,
                         BlockDataUtils.isSolid(level, blockPos))).orElse(null);
             } else {
-                BlockPos lastBeforePos = this.scaffoldPlaced.get(this.scaffoldPlaced.size() - 2).getKey();
+                BlockPos lastBeforePos = this.foresterBlockEntity.getScaffoldPlaced(scaffoldPlacedCount - 2).getKey();
                 if(lastBeforePos.getY() == lastPos.getY()) {
                     return Map.entry(lastPos.above(),  BlockDataUtils.isSolid(level, lastPos.above()));
                 }
@@ -659,9 +635,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                         (lastPos, this.nextBlockTarget);
                 Optional<BlockPos> blockPosResult = blockPositions.stream()
                         .filter(neighbor -> BlockDataUtils.hasTagsVertical(level, neighbor.above(),
-                                2, true, true, BlockTags.AIR) && ! placedPosition(neighbor.below())
-                                && ! placedPosition(neighbor.below().below())
-                                && ! placedPosition(neighbor.below().below().below()))
+                                2, true, true, BlockTags.AIR)
+                                && ! this.foresterBlockEntity.hasScaffoldPlaced(neighbor.below())
+                                && ! this.foresterBlockEntity.hasScaffoldPlaced(neighbor.below().below())
+                                && ! this.foresterBlockEntity.hasScaffoldPlaced(neighbor.below().below().below()))
                         .findFirst();
                 System.out.println("choose placement 3");
                 return blockPosResult.map(blockPos -> Map.entry(blockPos, BlockDataUtils
@@ -672,9 +649,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
                     (lastPos, this.nextBlockTarget);
             Optional<BlockPos> blockPosResult = blockPositions.stream()
                     .filter(neighbor -> BlockDataUtils.hasTagsVertical(level, neighbor.above(),
-                            2, true, true, BlockTags.AIR) && ! placedPosition(neighbor.below())
-                            && ! placedPosition(neighbor.below().below())
-                            && ! placedPosition(neighbor.below().below().below()))
+                            2, true, true, BlockTags.AIR)
+                            && ! this.foresterBlockEntity.hasScaffoldPlaced(neighbor.below())
+                            && ! this.foresterBlockEntity.hasScaffoldPlaced(neighbor.below().below())
+                            && ! this.foresterBlockEntity.hasScaffoldPlaced(neighbor.below().below().below()))
                     .findFirst();
             return blockPosResult.map(blockPos -> Map.entry(blockPos, BlockDataUtils
                     .isSolid(level, blockPos))).orElse(null);
@@ -682,46 +660,10 @@ public class ChopTreeBehavior extends AbstractVillagerBehavior {
 
     }
 
-    private boolean placedPosition(BlockPos blockPos) {
-        for(Map.Entry<BlockPos, Boolean> entry : scaffoldPlaced) {
-            if (blockPos.equals(entry.getKey())) {
-                return true;
-            }
+    private void selectNextTarget() {
+        if (this.foresterBlockEntity.hasPendingLogs()) {
+            this.nextBlockTarget = this.foresterBlockEntity.getFirstPendingLog();
         }
-        return false;
-    }
-
-    private Path getPath(Villager villager, BlockPos blockPos) {
-        return getPath(villager, blockPos, 2);
-    }
-
-    private Path getPath(Villager villager, BlockPos blockPos, int distance) {
-        return villager.getNavigation().createPath(blockPos, distance);
-    }
-
-    private void selectNextTarget(ServerLevel level, Villager villager) {
-        selectNextTarget(level,villager, this.nextBlockTarget);
-    }
-
-    private void selectNextTarget(ServerLevel level, Villager villager, BlockPos blockPos) {
-        if (!this.pendingLogs.isEmpty()) {
-            this.nextBlockTarget = blockPos != null ? blockPos : this.pendingLogs.getFirst();
-            System.out.println("next: " + this.nextBlockTarget);
-            BlockPos target = BlockDataUtils.getWalkableNeighbor(level, this.nextBlockTarget, villager.getOnPos().above());
-            System.out.println("pos on: " + villager.getOnPos());
-            System.out.println("target: " + target);
-            if(target != null) {
-               // moveTo(villager, target);
-/*
-                villager.getNavigation().moveTo(this.navigationPath, WALK_SPEED);*/
-            }
-        }
-    }
-
-
-
-    private void lookAt(Villager villager, BlockPos pos) {
-        villager.getLookControl().setLookAt(pos.getX() + 0.5, pos.getY() + 0.5, pos.getZ() + 0.5);
     }
 
     private boolean hasEnoughScaffoldBlocks(Villager villager) {

@@ -1,10 +1,11 @@
 package de.petrofsky.autonomousvillagers.villagers.goals;
 
 import de.petrofsky.autonomousvillagers.utils.*;
+import de.petrofsky.autonomousvillagers.utils.pathfinding.Node;
+import de.petrofsky.autonomousvillagers.utils.pathfinding.NodeActionType;
+import de.petrofsky.autonomousvillagers.utils.pathfinding.ShortPath;
 import de.petrofsky.autonomousvillagers.villagers.AbstractVillagerBehavior;
 import net.minecraft.core.BlockPos;
-import net.minecraft.tags.BlockTags;
-import net.minecraft.tags.ItemTags;
 import net.minecraft.tags.TagKey;
 import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.item.Item;
@@ -34,9 +35,11 @@ public class MoveToGoal extends Goal {
     private final HashSet<TagKey<Block>> breakableTags = new HashSet<>();
     private final HashSet<Item> placeableItems = new HashSet<>();
     private final HashSet<TagKey<Item>> placeableTags = new HashSet<>();
+    private boolean cheapBreak = false;
     private boolean closestPossible = false;
     private long searchLimit = 200;
     private int maxRetries = 2;
+    private int maxContinues = 4;
 
     public MoveToGoal(Villager villager, BlockPos target) {
         super(villager);
@@ -91,6 +94,11 @@ public class MoveToGoal extends Goal {
         return this;
     }
 
+    public MoveToGoal cheapBreak() {
+        this.cheapBreak = true;
+        return this;
+    }
+
     public MoveToGoal inTouchRange() {
         this.inTouchRange = true;
         return this;
@@ -104,9 +112,9 @@ public class MoveToGoal extends Goal {
     private void calculate(BlockPos target) {
         long before = System.currentTimeMillis();
         this.shortPath = new ShortPath(getLevel(), getVillagerPos(), target, getWithinDistance(),
-                breakableBlocks, breakableTags, InventoryUtils.count(getVillager(), ItemTags.DIRT),
-                searchLimit, closestPossible);
-        PerformanceUtils.timeMeasured("Path calculation", before);
+                breakableBlocks, breakableTags, 0,
+                searchLimit, closestPossible, cheapBreak);
+        PerformanceUtils.timeMeasured("Path calculation", before, false);
     }
 
     private BlockPos getVillagerPos() {
@@ -134,7 +142,6 @@ public class MoveToGoal extends Goal {
 
     @Override
     protected void tick() {
-        System.out.println("movement tick: " + tick);
         tick++;
         if(tick >= 20) {
             tick = 0;
@@ -142,16 +149,13 @@ public class MoveToGoal extends Goal {
 
         if(inTouchRange && AbstractVillagerBehavior.blockInTouchRange(getVillager(), getTarget())) {
             success();
-            System.out.println("in touch range success movement:");
             return;
         }
 
         if(currentTodo != null && currentTodo.isInProgress()) {
             currentTodo.executeTick();
-            System.out.println("execute todo in movement:");
             return;
         } else if(currentTodo != null) {
-            System.out.println("is door todo in movement:");
             if(currentTodo instanceof OpenDoorGoal openDoorGoal) {
                 long distance = BlockGeometry3DUtils.getDistanceSquared(getVillager().blockPosition(),
                         openDoorGoal.getDoorPos());
@@ -172,18 +176,20 @@ public class MoveToGoal extends Goal {
         ArrayList<Node> path = shortPath.getPath();
         int size = path.size();
         if(index >= size) {
-            System.out.println("move reach: " + this.shortPath.isReachable());
-            System.out.println("move limit: " + this.shortPath.searchLimitReached());
             if(!this.shortPath.isReachable() && this.shortPath.searchLimitReached() && !(inTouchRange
                     && AbstractVillagerBehavior.blockInTouchRange(getVillager(), getTarget()))) {
                 calculate(getTarget());
                 if(this.shortPath.getPath().size() < 3 && this.shortPath.searchLimitReached()) {
-                    fail();
+                    if(this.maxContinues > 0) {
+                        this.shortPath.continueScan(this.searchLimit * (5 - this.maxContinues));
+                        this.maxContinues--;
+                    } else {
+                        fail();
+                    }
                 }
                 index = 0;
                 return;
             }
-            System.out.println("normal Reachable: " + this.shortPath.isReachable());
             if( ! this.shortPath.isReachable() && !(inTouchRange
                     && AbstractVillagerBehavior.blockInTouchRange(getVillager(), getTarget()))
                 ) fail(); else success();
@@ -308,10 +314,10 @@ public class MoveToGoal extends Goal {
         boolean inWater = villagerPosState.getFluidState().is(Tags.Fluids.WATER);
         double dY = Math.abs(getVillager().getY() - nextPos.getY());
         if(index == getShortPath().getPath().size() - 1 ) {
-            if(blockHorizontalDistanceSquared < 1 && dY < 0.5) this.index++;
+            if(blockHorizontalDistanceSquared < 1 && dY < 1.0) this.index++;
         } else if (inWater && blockHorizontalDistanceSquared < 1) {
             this.index++;
-        } else if(!inWater && horizontalDistanceSquared < 0.8D && dY <= 1.5D) {
+        } else if(!inWater && horizontalDistanceSquared < 0.5D && dY <= 1.5D) {
             this.index++;
         }
 
@@ -327,7 +333,6 @@ public class MoveToGoal extends Goal {
     public void init() {
         getVillager().getNavigation().stop();
         calculate(getTarget());
-        System.out.println("Start movement");
     }
 
     public ShortPath getShortPath() {

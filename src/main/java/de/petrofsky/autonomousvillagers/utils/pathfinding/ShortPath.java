@@ -1,19 +1,18 @@
-package de.petrofsky.autonomousvillagers.utils;
+package de.petrofsky.autonomousvillagers.utils.pathfinding;
 
+import de.petrofsky.autonomousvillagers.utils.BlockGeometry3DUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.TagKey;
-import net.minecraft.world.entity.npc.Villager;
 import net.minecraft.world.level.Level;
 import net.minecraft.world.level.block.Block;
 import net.minecraft.world.level.block.state.BlockState;
-import net.minecraft.world.phys.Vec3;
 
 import java.util.*;
 
 public class ShortPath {
 
     private static final long DEFAULT_BLOCK_SEARCH_LIMIT = 200;
-    private final long blockSearchLimit;
+    private long blockSearchLimit;
     private final Level level;
     private final BlockPos targetPos;
     private final PriorityQueue<Node> unchecked;
@@ -27,6 +26,7 @@ public class ShortPath {
     private boolean done = false;
     private boolean searchLimitReached = false;
     private final boolean closestPossible;
+    private final boolean cheapBreak;
     private ArrayList<Node> path;
     private final HashSet<Block> breakableBlocks;
     private final HashSet<TagKey<Block>> breakableTags;
@@ -34,16 +34,12 @@ public class ShortPath {
     private final HashMap<BlockPos, Boolean> fullBlockCache = new HashMap<>();
     private final HashMap<BlockPos, Boolean> emptyCollisionCache = new HashMap<>();
 
-    public ShortPath(Level level, BlockPos origin, BlockPos targetPos, int withinDistance,
-                     HashSet<Block> breakableBlocks, HashSet<TagKey<Block>> breakableTags,
-                     long blocksLeft) {
-        this(level, origin, targetPos, withinDistance, breakableBlocks, breakableTags,
-                blocksLeft, DEFAULT_BLOCK_SEARCH_LIMIT, false);
-    }
+    private long costMove = 5L, costCliff = 8L, costWall = 8L, costJump = 20L, costFall = 10L, costDoor = 5L,
+            costBreak = 190L, costPlace = 200L;
 
     public ShortPath(Level level, BlockPos origin, BlockPos targetPos, int withinDistance,
                      HashSet<Block> breakableBlocks, HashSet<TagKey<Block>> breakableTags,
-                     long blocksLeft, long blockSearchLimit, boolean closestPossible) {
+                     long blocksLeft, long blockSearchLimit, boolean closestPossible, boolean cheapBreak) {
         this.level = level;
         this.targetPos = targetPos;
         this.breakableBlocks = breakableBlocks;
@@ -58,6 +54,10 @@ public class ShortPath {
         this.unchecked.add(new Node(origin, null, 0, blocksLeft, new HashMap<>()));
         this.blockSearchLimit = blockSearchLimit;
         this.closestPossible = closestPossible;
+        this.cheapBreak = cheapBreak;
+        if(cheapBreak) {
+            this.costBreak = 80L;
+        }
         calculate();
     }
 
@@ -204,8 +204,8 @@ public class ShortPath {
 
         ShortPath subPathFinder = new ShortPath(level, startNode.getPos(), targetNode.getPos(),
                 withinDistance, breakableBlocks, breakableTags, startNode.getBlocksLeft(),
-                blockSearchLimit, closestPossible);
-        if(!subPathFinder.isReachable()) {
+                blockSearchLimit, closestPossible, cheapBreak);
+        if(!subPathFinder.isReachable() || subPathFinder.getPath().size() < 3) {
             return false;
         }
 
@@ -244,18 +244,26 @@ public class ShortPath {
         }
         System.out.println("Checked blocks: " + this.checked.size());
         this.path = path;
-        this.unchecked.clear();
+        /*this.unchecked.clear();
         this.checked.clear();
-        this.nodes.clear();
+        this.nodes.clear();*/
         clearCache();
     }
 
-    private static long distanceCost(BlockPos origin, BlockPos target) {
+    public void continueScan(long additionalBlocks) {
+        this.searchLimitReached = false;
+        this.done = false;
+        this.blockSearchLimit += additionalBlocks;
+        calculate();
+    }
+
+    private long distanceCost(BlockPos origin, BlockPos target) {
         long distanceX = Math.abs(origin.getX() - target.getX());
-        long distanceY = Math.abs(origin.getY() - target.getY());
         long distanceZ = Math.abs(origin.getZ() - target.getZ());
-        long distanceXZ = distanceX + distanceZ;
-        return Math.min(3000, distanceXZ * distanceXZ * 10L) + Math.min(1500, distanceY * distanceY * 10L);
+        long rawDistanceY = target.getY() - origin.getY();
+        long verticalUnitCost = rawDistanceY > 0 ? (costMove + costJump) : (costMove + costFall);
+
+        return distanceX * costMove + distanceZ * costMove + Math.abs(rawDistanceY) * verticalUnitCost;
     }
 
     private Map.Entry<Long, HashMap<BlockPos, NodeActionType>> movementCost(Node originNode, BlockPos target) {
@@ -283,20 +291,20 @@ public class ShortPath {
 
         HashMap<BlockPos, NodeActionType> actions = new HashMap<>();
 
-        long cost = 5L;
+        long cost = this.costMove;
 
-        cost += PathUtils.countSolidNeighbor(this, originNode, target) * 8L;
-        cost += PathUtils.countSolidNeighbor(this, originNode, aboveTarget) * 8L;
-        cost += PathUtils.countCollusionFreeNeighbor(this, originNode, target.below()) * 8L;
-        cost += PathUtils.countCollusionFreeNeighbor(this, originNode, target.below().below()) * 8L;
+        cost += PathUtils.countSolidNeighbor(this, originNode, target) * this.costWall;
+        cost += PathUtils.countSolidNeighbor(this, originNode, aboveTarget) * this.costWall;
+        cost += PathUtils.countCollusionFreeNeighbor(this, originNode, target.below()) * this.costCliff;
+        cost += PathUtils.countCollusionFreeNeighbor(this, originNode, target.below().below()) * this.costCliff;
 
         BlockPos origin = originNode.getPos();
         if(origin.getY() > target.getY()) {
-            cost += 10L;
+            cost += this.costFall;
             checks.put(aboveTarget.above(), NodeActionType.BROKEN);
         } else if(origin.getY() < target.getY()) {
             checks.put(origin.above().above(), NodeActionType.BROKEN);
-            cost += 20L;
+            cost += this.costJump;
         }
 
         for(BlockPos blockPos : checks.keySet()) {
@@ -310,7 +318,7 @@ public class ShortPath {
                     actions.put(blockPos, NodeActionType.NONE);
                 } else {
                     actions.put(blockPos, NodeActionType.OPENED);
-                    cost += 5L;
+                    cost += this.costDoor;
                 }
                 continue;
             }
@@ -318,7 +326,7 @@ public class ShortPath {
             if(type == NodeActionType.BROKEN && PathUtils.requiresBreak(this, originNode, blockPos)) {
                 if(PathUtils.isBreakable(this, originNode, blockPos, breakableBlocks, breakableTags)) {
                     actions.put(blockPos, NodeActionType.BROKEN);
-                    cost += 190;
+                    cost += this.costBreak;
                 } else {
                     return Map.entry(-1L, actions);
                 }
@@ -326,7 +334,7 @@ public class ShortPath {
                 if(PathUtils.isPlaceable(this, originNode, blockPos, blocksLeft)) {
                     actions.put(blockPos, NodeActionType.PLACED);
                     blocksLeft--;
-                    cost += 200L;
+                    cost += this.costPlace;
                 } else {
                     return Map.entry(-1L, actions);
                 }

@@ -34,11 +34,15 @@ public abstract class Goal {
     }
 
     public boolean isInProgress() {
-        return !isStopped();
+        return !isStopped() && isStarted();
     }
 
     public boolean hasFailed() {
         return this.failed;
+    }
+
+    public boolean isSuccess() {
+        return !this.failed;
     }
 
     public boolean isPaused() {

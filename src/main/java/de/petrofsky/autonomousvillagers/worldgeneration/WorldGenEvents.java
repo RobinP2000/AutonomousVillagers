@@ -206,7 +206,6 @@ public class WorldGenEvents {
             level.setBlock(pos, ForesterBlock.WOOD_CHOP_BLOCK.get().defaultBlockState(), 3);
 
             if (level.getBlockEntity(pos) instanceof ForesterBlockEntity be) {
-                be.setField(dir, 12, 12);
                 System.out.println("[Forester] setField aufgerufen: dir="
                         + Arrays.toString(dir) + " bei " + pos);
             } else {

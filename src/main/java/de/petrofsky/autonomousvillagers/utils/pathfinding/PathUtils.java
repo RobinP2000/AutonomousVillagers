@@ -1,5 +1,6 @@
-package de.petrofsky.autonomousvillagers.utils;
+package de.petrofsky.autonomousvillagers.utils.pathfinding;
 
+import de.petrofsky.autonomousvillagers.utils.BlockDataUtils;
 import net.minecraft.core.BlockPos;
 import net.minecraft.tags.BlockTags;
 import net.minecraft.tags.TagKey;
